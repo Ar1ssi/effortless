@@ -12,7 +12,7 @@
   (other chats' changes sit in the tree). Reaches no user.
 - `tools/publish.sh "<what's new>" "<detail>"`: minor bump, writes releases.json and public.json, moves `stable`, then
   runs `tools/site.sh`. Every user gets an update card. Only on Isac's word.
-- Public: 1.64.0 (2026-10-08). Dev: 1.63.1.
+- Public: 1.71.0 (2026-10-12). Dev: same.
 
 ## Website
 - https://heycubit.github.io/effortless/ is `gh-pages`, rebuilt from `main`. Source `site/src/` (`template.html`,
@@ -45,6 +45,7 @@
 1. In a fresh (non-remote) chat on the public version: check the band, Compact, Handoff advice, Settings.
 2. Watch the first real report that arrives through the form; check the title, body and labels look right.
 3. Optional: ruleset blocking force pushes on `stable` (offered, no answer).
+4. Terminal: the update card shows no animation while updating (desktop has one); add a moving state there.
 
 ## Only Isac
 - Publishing to users, anything that force-pushes, anything with a login or a secret.
