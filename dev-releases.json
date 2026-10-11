@@ -1,5 +1,10 @@
 [
   {
+    "version": "1.70.3",
+    "date": "2026-10-11",
+    "note": "Terminal Settings cards open from either line; no noise art at rest"
+  },
+  {
     "version": "1.70.2",
     "date": "2026-10-11",
     "note": "Settings work in the terminal"

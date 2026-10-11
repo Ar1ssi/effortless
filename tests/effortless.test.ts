@@ -2675,14 +2675,15 @@ describe('terminal bands', () => {
     const panel = await $.ui.mount(at(36))
     const text = await drawn(panel)
     // No blank buttons laid over the cards: a terminal paints their spaces over the title and summary.
-    expect(text).not.toContain(' '.repeat(40))
+    expect(text).not.toContain(' '.repeat(800))
     expect(text).toContain('Effort ›')
     // Title and buttons are in the flow, so a narrow window wraps them instead of drawing one over the other.
     expect(text).not.toMatch(/"key":"settings-(title|actions)"[^}]*"position":"absolute"/)
     expect(text).not.toContain('"href"')
     await panel.press({ key: 'settings-bug' })
     expect(copied[0]).toContain('heycubit.github.io/effortless/report/')
-    await panel.press({ key: 'settings-card-effort' })
+    // The summary row opens the card too, not only the title.
+    await panel.press({ key: 'settings-card-effort-2' })
     expect(await drawn(panel)).toContain('Helpers')
     expect(await drawn(panel)).not.toContain(' '.repeat(40))
     await panel.unmount()
@@ -3195,7 +3196,8 @@ describe('dashboard', () => {
     expect(await band.find({ key: 'dash-auto' })).toBeUndefined()
     expect(await band.find({ key: 'dash-handoff' })).toBeDefined()
     expect(text).toContain('"children":["Effort"]')
-    expect(text).toContain('"type":"Raster"')
+    // No still sparkles at rest: 16 by 4 pixels of them read as noise in a terminal.
+    expect(text).not.toContain('"type":"Raster"')
     await band.unmount()
   })
 

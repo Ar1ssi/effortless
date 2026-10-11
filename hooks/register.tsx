@@ -2338,6 +2338,9 @@ function bandArt($: EngineInterface, e: RenderInput<'AbovePrompt'>, kind: ArtKin
   const els = themedEls($.ui.resolve(e))
   const columns = typeof e.props.bodyColumns === 'number' ? e.props.bodyColumns : 0
   if (e.surface !== 'terminal' || !('Raster' in els) || columns < ART_MIN_WIDTH) return null
+  // The still sparkles (the resting dashboard, the guide) are 16 by 4 pixels: in a terminal they read as noise, not
+  // art. Only the art that says something stays: the alerts, compacting and the done tick.
+  if (kind === 'calm' || kind === 'brand') return null
   const { Box, Raster } = els
   artShown = { requestId: e.requestId, kind }
   if (MOVING.has(kind) && !artTimer) {
@@ -4666,17 +4669,23 @@ Saved to ${out}.md and .json` }
               {CARDS.map(c => (
                 <Box key={`card-${c.id}`} position="relative" flexDirection="column" flexGrow={1} width={0} minWidth={18}
                   paddingX={1} borderStyle="round" borderColor={DASH_EDGE} hover={{ backgroundColor: CARD_HOVER, borderColor: CARD_HOVER_EDGE }}>
-                  <Box flexDirection="row" gap={1} alignItems="center">
-                    {Svg && !term ? <Svg source={rowIconSvg(c.id, DASH_TEXT)} alt={c.title} width={14} height={14} /> : null}
-                    {/* The terminal draws the blank buttons below as real spaces over the card's text, so there the
-                        title itself is the button. */}
-                    {term ? (
-                      <Button key={`settings-card-${c.id}`} plain label={`${c.title} ›`} onPress={openCard(c.id)} />
-                    ) : (
+                  {/* The terminal draws the blank buttons below as real spaces over the card's text, so there each text
+                      row is a button of its own, padded with no-break spaces and clipped to the card, so a click anywhere
+                      on either row opens it (only the word took clicks before). */}
+                  {term ? [
+                    <Box key={`settings-card-row-${c.id}`} overflow="hidden"><Box flexShrink={0}>
+                      <Button key={`settings-card-${c.id}`} plain label={`${c.title} ›${' '.repeat(200)}`} onPress={openCard(c.id)} />
+                    </Box></Box>,
+                    <Box key={`settings-card-row-${c.id}-2`} overflow="hidden"><Box flexShrink={0}>
+                      <Button key={`settings-card-${c.id}-2`} plain dimColor label={`${summaries[c.id]}${' '.repeat(200)}`} onPress={openCard(c.id)} />
+                    </Box></Box>,
+                  ] : [
+                    <Box key={`settings-card-head-${c.id}`} flexDirection="row" gap={1} alignItems="center">
+                      {Svg ? <Svg source={rowIconSvg(c.id, DASH_TEXT)} alt={c.title} width={14} height={14} /> : null}
                       <Text color={DASH_TEXT} bold hover={{ color: '#ffffff' }}>{c.title}</Text>
-                    )}
-                  </Box>
-                  <Text dimColor wrap="truncate" hover={{ dimColor: false, color: DASH_TEXT }}>{summaries[c.id]}</Text>
+                    </Box>,
+                    <Text key={`settings-card-sum-${c.id}`} dimColor wrap="truncate" hover={{ dimColor: false, color: DASH_TEXT }}>{summaries[c.id]}</Text>,
+                  ]}
                   {/* The click takes the whole card: a button is one line high and centred in its box, whatever the box,
                       so three blank ones are spread from the top edge to the bottom one and overlap. The card lights as a
                       whole (its own hover); two, spaced around, left its edges and a stripe between the lines dead. */}
