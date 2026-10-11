@@ -2526,10 +2526,11 @@ function uninstallButton($: EngineInterface, els: ReturnType<EngineInterface['ui
     }
     uninstalling = true
     $.ui.invalidate('ui.render')
-    const r = await $.process.run(['claude', 'plugin', 'uninstall', pluginId($)], { timeoutMs: 120_000 }).catch(error => ({ exitCode: 1, stdout: '', stderr: String(error) }))
+    const r = await runClaude($, ['plugin', 'uninstall', pluginId($)], { timeoutMs: 120_000 }).catch(error => ({ exitCode: 1, stdout: '', stderr: String(error) }))
     uninstalling = false
     if (r.exitCode !== 0) {
-      $.ui.toast(`effortless: uninstall failed: ${(r.stderr || r.stdout).trim().split('\n').pop()}`)
+      const why = (r.stderr || r.stdout).trim().split('\n').pop() ?? ''
+      $.ui.toast(`effortless: uninstall failed: ${noClaudeHint(why, await homeDir($)) ?? why}`)
       $.ui.invalidate('ui.render')
       return
     }
@@ -2690,7 +2691,7 @@ async function latestAvailable($: EngineInterface): Promise<{ latest?: { version
     return latestRelease(typeof text === 'string' ? text : '')
   }
   // Always refreshed: the host's web fetch can answer from its own cache, git does not.
-  await $.process.run(['claude', 'plugin', 'marketplace', 'update', 'effortless'], { timeoutMs: 120_000, env: GITHUB_OVER_HTTPS }).catch(() => null)
+  await runClaude($, ['plugin', 'marketplace', 'update', 'effortless'], { timeoutMs: 120_000, env: GITHUB_OVER_HTTPS }).catch(() => null)
   const local = await readLocal()
   const best = fromWeb && (!local || !isNewer(local.version, fromWeb.version)) ? fromWeb : local
   return { latest: best, how: `git failed; ${web}; marketplace ${local?.version ?? 'unreadable'}` }
@@ -2802,20 +2803,55 @@ export function updateFailure(output: string): string {
   const why = line.replace(/^(fatal|error):\s*/i, '').replace(/^✘\s*/, '')
   return why.length > 160 ? `${why.slice(0, 159)}…` : why
 }
+/**
+ * Where `claude` may be: on PATH, then where the official installers put it. The desktop app starts with the PATH it
+ * had at login, so a CLI installed since is not on it until the next sign-in.
+ */
+export function claudeCandidates(home: string | undefined): string[] {
+  if (!home) return ['claude']
+  const win = /^[A-Za-z]:/.test(home)
+  const sep = home.includes('\\') ? '\\' : '/'
+  return ['claude', [home.replace(/[\\/]+$/, ''), '.local', 'bin', win ? 'claude.exe' : 'claude'].join(sep)]
+}
+// What the engine says when a command cannot be started at all, as opposed to one that ran and failed.
+const NOT_STARTED = /ENOENT|not found or is in an unsafe location|failed to start/i
+/** For a `claude` that would not start: what to install, in the person's own shell; undefined for any other error. */
+export function noClaudeHint(error: string, home: string | undefined): string | undefined {
+  if (!NOT_STARTED.test(error)) return undefined
+  const install = home && /^[A-Za-z]:/.test(home) ? 'irm https://claude.ai/install.ps1 | iex' : 'curl -fsSL https://claude.ai/install.sh | bash'
+  return `This needs the Claude Code CLI. Install it with ${install}, then reopen the app.`
+}
+const homeDir = async ($: EngineInterface) => ((await envUserProfile($)) ?? (await envHome($))) || undefined
+/** `claude <args>`, from the next place it may be when one will not start. */
+async function runClaude($: EngineInterface, args: string[], opts: Parameters<EngineInterface['process']['run']>[1]) {
+  let last: unknown
+  for (const bin of claudeCandidates(await homeDir($))) {
+    try {
+      return await $.process.run([bin, ...args], opts)
+    } catch (error) {
+      last = error
+      if (!NOT_STARTED.test(String(error))) throw error
+    }
+  }
+  throw last
+}
 /** Update pressed: the marketplace and the plugin are updated as `claude plugin` does, then the plugins reloaded so
  * the new version runs in this chat. The new module shows "Updated" (see session.start). */
 async function runUpdate($: EngineInterface, card: UpdateCard) {
   await update($, updateCard, () => ({ ...card, stage: 'updating' }))
-  const step = async (argv: string[]) => {
-    const r = await $.process.run(argv, { timeoutMs: 180_000, env: GITHUB_OVER_HTTPS })
-    if (r.exitCode !== 0) throw new Error(updateFailure(r.stderr || r.stdout) || `${argv.join(' ')} failed`)
+  const step = async (args: string[]) => {
+    const r = await runClaude($, args, { timeoutMs: 180_000, env: GITHUB_OVER_HTTPS })
+    if (r.exitCode !== 0) throw new Error(updateFailure(r.stderr || r.stdout) || `claude ${args.join(' ')} failed`)
   }
   try {
     // This install's own marketplace: effortless for users, effortless-dev on the dev channel.
-    await step(['claude', 'plugin', 'marketplace', 'update', pluginId($).split('@')[1]])
-    await step(['claude', 'plugin', 'update', pluginId($)])
+    await step(['plugin', 'marketplace', 'update', pluginId($).split('@')[1]])
+    await step(['plugin', 'update', pluginId($)])
   } catch (error) {
-    await update($, updateCard, () => ({ ...card, stage: 'failed', detail: String(error instanceof Error ? error.message : error) }))
+    const message = String(error instanceof Error ? error.message : error)
+    // No CLI anywhere (a desktop-only install): say what to install, not the engine's ENOENT.
+    const home = await homeDir($)
+    await update($, updateCard, () => ({ ...card, stage: 'failed', detail: noClaudeHint(message, home) ?? message }))
     return
   }
   // The desktop app keeps this chat on the folder it started with, and a reload reads that folder again: so the new
@@ -2890,6 +2926,7 @@ function updateCardTree($: EngineInterface, e: RenderInput<'AbovePrompt'>, card:
       {el as never}
     </Box>
   )
+  const installLine = card.stage === 'failed' ? card.detail?.match(/(irm \S+ \| iex|curl -fsSL \S+ \| bash)/)?.[1] : undefined
   // The offer is Update or Later (Later puts this version away for a day); "Updated" has the link and a ✕; a failed
   // update has Try again and ✕. Nothing while it runs.
   const controls =
@@ -2900,6 +2937,13 @@ function updateCardTree($: EngineInterface, e: RenderInput<'AbovePrompt'>, card:
         ]
       : card.stage === 'failed'
         ? [
+            // No CLI: the install line can be cut off on a narrow card, so it is a press away whole.
+            ...(installLine
+              ? [own('update-copy-box', <Button key="update-copy" variant="secondary" label="Copy install command" onPress={async () => {
+                  const r = await $.ui.copy({ text: installLine, surface: e.surface }).catch(() => ({ isCopied: false as const }))
+                  $.ui.toast(r.isCopied ? 'Install command copied. Paste it in PowerShell or Terminal, then reopen the app.' : `effortless: run ${installLine}`)
+                }} />)]
+              : []),
             own('update-go-box', <Button key="update-go" variant="primary" label="Try again" onPress={() => runUpdate($, card)} />),
             own('update-close-box', <Button key="update-close" plain label="✕" hover={{ backgroundColor: CARD_CLOSE_HOVER }} onPress={hide} />),
           ]

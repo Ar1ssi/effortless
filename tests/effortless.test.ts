@@ -1,7 +1,7 @@
 import { describe, expect, mock, test as baseTest } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
-import { helperFloor, namedEffort, hotVisible, looksLikeRedo, REDO_STAY_PROMPTS, routeWorth, syncPlan, tipped, bounded, handoffEvidence, parseHandoffAnswer, withJevKey, parseVerdict, capped, resetLabel, HANDOFF_PROMPT, handoffMessage, withAttachments, endsOnQuestion, keepsEffort, benchGrade, benchReport, judgeFailure, contextFrom, readConfig, asSpent, cacheColor, cacheLabel, cacheClock, cacheSafe, cacheTtlOf, mostlyCached, isFollowUp, parseJevAnswer, parseJevKey, savedText, forkOutcome, setupNext, setupBack, setupCounter, dashboardLines, flashColor, handoffGlowStep, weighted, handoffLook, isNewer, latestRelease, updateSnoozed, updateFailure, compactTranscript, judgeGlowSvg, judgeGlowAt, judgeBrightnessAt, JUDGE_RISE_MS, JUDGE_FADE_MS, JUDGE_STEP_MS, JUDGE_PIECE_MS } from '../hooks/register'
+import { helperFloor, namedEffort, hotVisible, looksLikeRedo, REDO_STAY_PROMPTS, routeWorth, syncPlan, tipped, bounded, handoffEvidence, parseHandoffAnswer, withJevKey, parseVerdict, capped, resetLabel, HANDOFF_PROMPT, handoffMessage, withAttachments, endsOnQuestion, keepsEffort, benchGrade, benchReport, judgeFailure, contextFrom, readConfig, asSpent, cacheColor, cacheLabel, cacheClock, cacheSafe, cacheTtlOf, mostlyCached, isFollowUp, parseJevAnswer, parseJevKey, savedText, forkOutcome, setupNext, setupBack, setupCounter, dashboardLines, flashColor, handoffGlowStep, weighted, handoffLook, isNewer, latestRelease, updateSnoozed, updateFailure, claudeCandidates, noClaudeHint, compactTranscript, judgeGlowSvg, judgeGlowAt, judgeBrightnessAt, JUDGE_RISE_MS, JUDGE_FADE_MS, JUDGE_STEP_MS, JUDGE_PIECE_MS } from '../hooks/register'
 import { ART_COLUMNS, artFrame, artPixel, MOVING } from '../hooks/art'
 import { isLight, lightHex, lightProps, setLight, setTheme, themedEls, themedSvg, tint, tintHex } from '../hooks/theme'
 import { importsOf, moduleLinks, moduleOf, relPath, withTouch } from '../hooks/agents'
@@ -3356,8 +3356,8 @@ describe('a message typed while a turn runs', () => {
 describe('updates', () => {
   const DESK = { options: { layout: 'default' } } as never
   /** A session with `installed` on disk and `latest` on main; records what the mod runs. */
-  function world(on: On, v: { installed: string; latest: string; fails?: string; git?: string; installPath?: string }) {
-    engine(on)
+  function world(on: On, v: { installed: string; latest: string; fails?: string; git?: string; installPath?: string; noCli?: (bin: string) => boolean; env?: Record<string, string> }) {
+    engine(on, v.env)
     const clock = mock.clock(on)
     on('session.start', (_$, e) => ({ cwd: e.cwd }) as never)
     on('fs.read', (_$, e) => {
@@ -3374,6 +3374,8 @@ describe('updates', () => {
     const ran: string[] = []
     const envs: (Record<string, string> | undefined)[] = []
     on('process.run', (_$, e) => {
+      // No claude where the app looks: the engine refuses to start it, as it does for a desktop-only user.
+      if (v.noCli?.(e.argv[0])) return { deny: `$.process.run(${e.argv[0]}) failed to start: ENOENT: Command '${e.argv[0]}' not found or is in an unsafe location (current directory)` } as never
       ran.push(e.argv.join(' '))
       envs.push(e.init?.env)
       // git show answers with public.json as it is on stable, when the test gives one.
@@ -3657,6 +3659,47 @@ describe('updates', () => {
     expect(updateFailure('network down')).toBe('network down')
     expect(updateFailure('x'.repeat(300))).toHaveLength(160)
     expect(updateFailure('')).toBe('')
+  })
+
+  test('claude is looked for on PATH, then where the Windows and Mac installers put it', () => {
+    expect(claudeCandidates('C:/Users/friend')).toEqual(['claude', 'C:/Users/friend/.local/bin/claude.exe'])
+    expect(claudeCandidates('/Users/friend')).toEqual(['claude', '/Users/friend/.local/bin/claude'])
+    expect(claudeCandidates(undefined)).toEqual(['claude'])
+    expect(noClaudeHint("$.process.run(claude) failed to start: ENOENT: Command 'claude' not found or is in an unsafe location (current directory)", 'C:/Users/friend')).toContain('install.ps1')
+    expect(noClaudeHint('spawn claude ENOENT', '/Users/friend')).toContain('install.sh')
+    expect(noClaudeHint('network down', '/Users/friend')).toBeUndefined()
+  })
+
+  test('with no claude on PATH, the update runs the installed one in .local/bin', DESK, async ($, on) => {
+    const w = world(on, { installed: '1.0.0', latest: '1.0.1', noCli: bin => bin === 'claude', env: { USERPROFILE: 'C:/Users/friend' } })
+    await start($)
+    await settle()
+    const ui = await $.ui.mount({ plugin: 'effortless', surface: 'desktop', ...BAND })
+    await pastSetup(ui)
+    await ui.press({ key: 'update-go' })
+    await settle()
+    expect(w.ran.filter(r => r.includes('plugin update effortless@'))).toEqual(['C:/Users/friend/.local/bin/claude.exe plugin update effortless@effortless'])
+    expect(await drawn(ui)).toContain('Updated to 1.0.1')
+    await ui.unmount()
+  })
+
+  test('with no claude anywhere, a failed update says the CLI is needed and how to get it', DESK, async ($, on) => {
+    const { copied } = world(on, { installed: '1.0.0', latest: '1.0.1', noCli: () => true, env: { USERPROFILE: 'C:/Users/friend' } })
+    on('ui.toast', () => ({ value: undefined }) as never)
+    await start($)
+    await settle()
+    const ui = await $.ui.mount({ plugin: 'effortless', surface: 'desktop', ...BAND })
+    await pastSetup(ui)
+    await ui.press({ key: 'update-go' })
+    await settle()
+    const text = await drawn(ui)
+    expect(text).toContain('Update failed')
+    expect(text).toContain('install.ps1')
+    expect(text).not.toContain('ENOENT')
+    // The line can be cut off on a narrow card: Copy install command hands it over whole.
+    await ui.press({ key: 'update-copy' })
+    expect(copied).toEqual(['irm https://claude.ai/install.ps1 | iex'])
+    await ui.unmount()
   })
 
   test('the update reaches GitHub over HTTPS, so users without an SSH key there can update', DESK, async ($, on) => {

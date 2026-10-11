@@ -1,5 +1,10 @@
 [
   {
+    "version": "1.70.6",
+    "date": "2026-10-11",
+    "note": "Update works without claude on PATH, or says how to get it"
+  },
+  {
     "version": "1.70.5",
     "date": "2026-10-11",
     "note": "Terminal: effort word flashes, choices are buttons, cards back to title"
