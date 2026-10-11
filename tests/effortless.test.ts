@@ -2658,6 +2658,35 @@ describe('terminal bands', () => {
       await narrow.unmount()
     })
   }
+
+  test('Settings in a narrow terminal: cards keep their text, the header wraps, the bug link copies', async ($, on) => {
+    engine(on)
+    mock.clock(on)
+    const copied: string[] = []
+    on('ui.copy', (_$, e) => {
+      copied.push(e.text)
+      return { value: { isCopied: true } } as never
+    })
+    await start($, on)
+    const guide = await $.ui.mount(at(36))
+    await guide.press({ key: 'setup-close' })
+    await guide.unmount()
+    await $.command.run({ command: 'effortless', args: 'settings' } as never)
+    const panel = await $.ui.mount(at(36))
+    const text = await drawn(panel)
+    // No blank buttons laid over the cards: a terminal paints their spaces over the title and summary.
+    expect(text).not.toContain(' '.repeat(40))
+    expect(text).toContain('Effort ›')
+    // Title and buttons are in the flow, so a narrow window wraps them instead of drawing one over the other.
+    expect(text).not.toMatch(/"key":"settings-(title|actions)"[^}]*"position":"absolute"/)
+    expect(text).not.toContain('"href"')
+    await panel.press({ key: 'settings-bug' })
+    expect(copied[0]).toContain('heycubit.github.io/effortless/report/')
+    await panel.press({ key: 'settings-card-effort' })
+    expect(await drawn(panel)).toContain('Helpers')
+    expect(await drawn(panel)).not.toContain(' '.repeat(40))
+    await panel.unmount()
+  })
 })
 
 describe('dashboard', () => {

@@ -4580,6 +4580,11 @@ Saved to ${out}.md and .json` }
       // Probe 2 keeps only the frame and header; probe 3 keeps the rows of buttons and text, no pickers or fields.
       const frameOnly = probeLevel === 2
       const bare = probeLevel === 3
+      // Desktop keeps title and buttons as absolute layers straight under the panel; the terminal gets a wrapping row.
+      const headRow = (kids: unknown[]) => term
+        ? <Box key="settings-head" flexDirection="row" flexWrap="wrap" justifyContent="space-between" columnGap={2}>{kids}</Box>
+        : kids
+      const bugUrl = ownVersion ? `${REPORT_BUG_URL}?effortless=${encodeURIComponent(ownVersion)}` : REPORT_BUG_URL
       return (
         // The dashboard's look: the neutral band and its quiet edge, purple only on the star, no art behind the rows (it
         // made them busy). The entrance
@@ -4601,8 +4606,10 @@ Saved to ${out}.md and .json` }
             </Box>
           ) : null}
           {/* Title and buttons are centred in the whole bar (it reaches from the border to the line under it), so the
-              space above them equals the space below. */}
-          <Box key="settings-title" position="absolute" top={0} left={2} height={term ? 2 : 2.5} flexDirection="row" alignItems="center" gap={1}>
+              space above them equals the space below. The terminal has no bar: both sit in the flow on one row that
+              wraps, since two absolute layers drew over each other in a narrow window ("SettCheck for updates"). */}
+          {headRow([
+          <Box key="settings-title" {...(term ? { flexShrink: 0 } : { position: 'absolute', top: 0, left: 2, height: 2.5 })} flexDirection="row" alignItems="center" gap={1}>
             {term ? <Text color={ACCENT} bold>✦</Text> : null}
             {Svg && !term ? <Svg source={SETTINGS_TITLE} alt="effortless" width={92} height={28} /> : <Text color={DASH_TEXT} bold>effortless</Text>}
             {ownVersion ? <Text color="#6b6b73">v{ownVersion}</Text> : null}
@@ -4617,8 +4624,8 @@ Saved to ${out}.md and .json` }
               </Box>
             )}
             {dirty ? <Text dimColor> · unsaved changes</Text> : null}
-          </Box>
-          <Box key="settings-actions" position="absolute" top={0} right={2} height={term ? 2 : 2.5} flexDirection="row" gap={2} alignItems="center">
+          </Box>,
+          <Box key="settings-actions" {...(term ? { flexShrink: 1, flexWrap: 'wrap', columnGap: 2 } : { position: 'absolute', top: 0, right: 2, height: 2.5, gap: 2 })} flexDirection="row" alignItems="center">
             {checking === 'checking' ? (
               <Text dimColor>Checking…</Text>
             ) : checking === 'newest' ? (
@@ -4633,7 +4640,15 @@ Saved to ${out}.md and .json` }
             ) : (
               <Button key="settings-check-update" plain dimColor label="Check for updates" onPress={() => void checkUpdateNow($)} />
             )}
-            <Text color="#9a9aa3"><Link href={ownVersion ? `${REPORT_BUG_URL}?effortless=${encodeURIComponent(ownVersion)}` : REPORT_BUG_URL} label="Report a bug" /></Text>
+            {/* A terminal without link support prints the whole address after the label, so there it copies instead. */}
+            {term ? (
+              <Button key="settings-bug" plain dimColor label="Report a bug" onPress={async () => {
+                const r = await $.ui.copy({ text: bugUrl, surface: e.surface }).catch(() => ({ isCopied: false as const }))
+                $.ui.toast(r.isCopied ? `Bug report link copied: ${bugUrl}` : `effortless: report a bug at ${bugUrl}`)
+              }} />
+            ) : (
+              <Text color="#9a9aa3"><Link href={bugUrl} label="Report a bug" /></Text>
+            )}
             {/* Grey and inert until something changed: there is nothing to save. */}
             {dirty ? (
               <Button key="settings-save" variant="primary" hotkey="s" label="Save" onPress={() => saveDraft($)} />
@@ -4641,24 +4656,31 @@ Saved to ${out}.md and .json` }
               <Button key="settings-save" variant="secondary" dimColor label="Save" onPress={() => {}} />
             )}
             <Button key="settings-close" plain label="✕" onPress={close} />
-          </Box>
-          <Box key="settings-spacer" height={roomy && !term ? 2 : 1} />
+          </Box>,
+          ])}
+          {term ? null : <Box key="settings-spacer" height={roomy ? 2 : 1} />}
           {frameOnly ? null : card === null ? (
             // The overview: a card per part, what it is set to in a few words. A card opens that part alone.
-            <Box key="settings-cards" flexDirection="row" flexWrap="wrap" gap={1}>
+            <Box key="settings-cards" flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={term ? 0 : 1}>
               <Box position="absolute" top={0} left={0} />
               {CARDS.map(c => (
                 <Box key={`card-${c.id}`} position="relative" flexDirection="column" flexGrow={1} width={0} minWidth={18}
                   paddingX={1} borderStyle="round" borderColor={DASH_EDGE} hover={{ backgroundColor: CARD_HOVER, borderColor: CARD_HOVER_EDGE }}>
                   <Box flexDirection="row" gap={1} alignItems="center">
                     {Svg && !term ? <Svg source={rowIconSvg(c.id, DASH_TEXT)} alt={c.title} width={14} height={14} /> : null}
-                    <Text color={DASH_TEXT} bold hover={{ color: '#ffffff' }}>{c.title}</Text>
+                    {/* The terminal draws the blank buttons below as real spaces over the card's text, so there the
+                        title itself is the button. */}
+                    {term ? (
+                      <Button key={`settings-card-${c.id}`} plain label={`${c.title} ›`} onPress={openCard(c.id)} />
+                    ) : (
+                      <Text color={DASH_TEXT} bold hover={{ color: '#ffffff' }}>{c.title}</Text>
+                    )}
                   </Box>
                   <Text dimColor wrap="truncate" hover={{ dimColor: false, color: DASH_TEXT }}>{summaries[c.id]}</Text>
                   {/* The click takes the whole card: a button is one line high and centred in its box, whatever the box,
                       so three blank ones are spread from the top edge to the bottom one and overlap. The card lights as a
                       whole (its own hover); two, spaced around, left its edges and a stripe between the lines dead. */}
-                  <Box position="absolute" top={0} bottom={0} left={0} right={0} flexDirection="column" justifyContent="space-between">
+                  {term ? null : <Box position="absolute" top={0} bottom={0} left={0} right={0} flexDirection="column" justifyContent="space-between">
                     {/* Each button sits in a clipping box and does not shrink: in a narrow card a shrunk button cut its
                         blank label to "\u2026", three stacked dots on the card. 800 no-break spaces (about 2,000 px: one is ~2.6 px, measured with
                         tools/render-band --hit) cover a card alone on its row edge to edge; the box clips the rest. */}
@@ -4669,7 +4691,7 @@ Saved to ${out}.md and .json` }
                         </Box>
                       </Box>
                     ))}
-                  </Box>
+                  </Box>}
                 </Box>
               ))}
             </Box>
@@ -4698,7 +4720,7 @@ Saved to ${out}.md and .json` }
                   // Effort for helpers on a row of its own: the dashboard's Auto switch exactly (switch, word, slide,
                   // one blank button laid over both), then what it does now.
                   <Box key="settings-helpers-row" width="100%" flexDirection="row" alignItems="center" gap={1}>
-                    {Svg ? (
+                    {Svg && !term ? (
                       <Box key="settings-helpers" position="relative" flexDirection="row" alignItems="center" gap={1} paddingX={1}>
                         <Svg source={autoSwitchSvg(shown.helpers === 'on', helpersNow - helpersFlipAt)} alt={shown.helpers === 'on' ? 'Helpers on' : 'Helpers off'} width={26} height={15} />
                         <Text color={shown.helpers === 'on' ? DASH_TEXT : DASH_DIM}>Helpers</Text>
