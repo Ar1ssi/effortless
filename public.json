@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.71.0",
+    "date": "2026-10-11",
+    "note": "Works properly in the terminal, and updates without the CLI on PATH",
+    "detail": [
+      "Settings in the terminal: cards show their text, the header wraps in a narrow window, short choices are one-press buttons",
+      "The terminal bar has Auto on/off, and the effort word flashes on a change like on desktop",
+      "Update finds Claude Code in ~/.local/bin when the app cannot see it; with no CLI it says what to install and copies the command",
+      "Typing an effort level by name (low, high, max) skips the judge; subagents follow the turn's effort"
+    ],
+    "public": true
+  },
+  {
     "version": "1.70.0",
     "date": "2026-10-10",
     "note": "Alerts that stay closed, cheaper handoffs",
