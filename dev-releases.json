@@ -1,5 +1,10 @@
 [
   {
+    "version": "1.70.5",
+    "date": "2026-10-11",
+    "note": "Terminal: effort word flashes, choices are buttons, cards back to title"
+  },
+  {
     "version": "1.70.4",
     "date": "2026-10-11",
     "note": "Auto sits in the terminal bar"

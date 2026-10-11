@@ -2682,10 +2682,16 @@ describe('terminal bands', () => {
     expect(text).not.toContain('"href"')
     await panel.press({ key: 'settings-bug' })
     expect(copied[0]).toContain('heycubit.github.io/effortless/report/')
-    // The summary row opens the card too, not only the title.
-    await panel.press({ key: 'settings-card-effort-2' })
+    await panel.press({ key: 'settings-card-effort' })
     expect(await drawn(panel)).toContain('Helpers')
     expect(await drawn(panel)).not.toContain(' '.repeat(40))
+    // Short choices are buttons, not a dropdown that opens inside the row: one press picks.
+    await panel.press({ key: 'settings-back' })
+    await panel.press({ key: 'settings-card-show' })
+    expect(await panel.find({ key: 'settings-theme' })).toBeDefined()
+    await panel.press({ key: 'settings-theme-rose' })
+    expect(await drawn(panel)).toContain('unsaved changes')
+    expect(JSON.stringify(await panel.find({ key: 'settings-theme-rose' }))).toContain('"variant":"secondary"')
     await panel.unmount()
   })
 })

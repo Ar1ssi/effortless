@@ -2383,14 +2383,14 @@ function terminalPanel($: EngineInterface, e: RenderInput<'AbovePrompt'>, key: s
         </Box>
         {bandArt($, e, 'brand')}
       </Box>
-      <Box key={`${key}-actions`} flexDirection="row" flexWrap="wrap" gap={1} alignItems="center">
+      <Box key={`${key}-actions`} flexDirection="row" flexWrap="wrap" justifyContent="flex-end" columnGap={1} alignItems="center">
         {controls}
       </Box>
     </Box>
   )
 }
 
-type TerminalBand = { key: string; kind: ArtKind; color: string; bg: string; edge: string; title: string; detail: string; buttons: unknown[]; autoInBar?: boolean }
+type TerminalBand = { key: string; kind: ArtKind; color: string; bg: string; edge: string; title: string; detail: string; buttons: unknown[]; autoInBar?: boolean; word?: { text: string; color: string; rest: string } }
 
 /** An alert band on the terminal: title and buttons, the detail on a line of its own, art on the right, and the effort
  * row under it, so effort stays in sight while a band shows. */
@@ -2403,7 +2403,15 @@ async function terminalBand($: EngineInterface, e: RenderInput<'AbovePrompt'>, b
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Box flexDirection="row" gap={1} alignItems="center">
             <Box flexShrink={0}>
-              <Text color={b.color} bold>{`✦ ${b.title}`}</Text>
+              {b.word ? (
+                <Box flexDirection="row">
+                  <Text color={b.color} bold>{'✦ '}</Text>
+                  <Text key={`${b.key}-word`} color={b.word.color} bold>{b.word.text}</Text>
+                  <Text color={b.color} bold>{b.word.rest}</Text>
+                </Box>
+              ) : (
+                <Text color={b.color} bold>{`✦ ${b.title}`}</Text>
+              )}
             </Box>
             <Box flexGrow={1} />
             {b.buttons}
@@ -3303,8 +3311,10 @@ async function dashboardBand($: EngineInterface, e: RenderInput<'AbovePrompt'>) 
     // No-break spaces, not braille blanks: some fonts draw U+2800 as a dot.
     <Button key="dash-settings" plain label={'Svg' in els && e.surface !== 'terminal' ? '   ' : 'Settings'} onPress={toggleSettings} />,
   ].filter(Boolean)
+  // The terminal flashes the effort word as the desktop does: violet on a change, fading back to white.
   if (e.surface === 'terminal')
-    return terminalBand($, e, { key: 'dash', kind: 'calm', color: DASH_TEXT, bg: DASH_BG, edge: DASH_EDGE, title: head.replace(/^✦ /, ''), detail, buttons, autoInBar: true })
+    return terminalBand($, e, { key: 'dash', kind: 'calm', color: DASH_TEXT, bg: DASH_BG, edge: DASH_EDGE, title: head.replace(/^✦ /, ''), detail, buttons, autoInBar: true,
+      word: { text: what, color: await effortFlash($, what, Boolean(v.judging), entering), rest } })
   const Svg = 'Svg' in els ? els.Svg : undefined
   const wordColor = await effortFlash($, what, Boolean(v.judging), entering)
   glowReadAt = Date.now()
@@ -4569,6 +4579,21 @@ Saved to ${out}.md and .json` }
           </Box>
         </Box>
       )
+      // The terminal's dropdown opens its list inside the wrapping row, which jumps the layout and is hard to click.
+      // There a short list is a row of buttons, the picked one boxed; a long one (the skills) stays a dropdown.
+      type Pick = { key: string; label?: string; value: string; options: { value: string; label: string }[]; onSelect: (v: string) => unknown }
+      const pick = (p: Pick) => term && p.options.length <= 5 ? (
+        <Box key={p.key} width="100%" flexDirection="row" flexWrap="wrap" columnGap={1} alignItems="center">
+          {p.label ? <Text key={`${p.key}-label`} dimColor>{p.label}</Text> : null}
+          {p.options.map(o => o.value === p.value ? (
+            <Button key={`${p.key}-${o.value}`} variant="secondary" label={o.label} onPress={() => p.onSelect(o.value)} />
+          ) : (
+            <Button key={`${p.key}-${o.value}`} plain dimColor label={o.label} onPress={() => p.onSelect(o.value)} />
+          ))}
+        </Box>
+      ) : (
+        <Select key={p.key} label={p.label} value={p.value} options={p.options} onSelect={p.onSelect} />
+      )
       const field = (key: string, input: unknown, width: number) => (
         <Box key={key} width={width} flexShrink={1}>
           {input}
@@ -4673,23 +4698,17 @@ Saved to ${out}.md and .json` }
               {CARDS.map(c => (
                 <Box key={`card-${c.id}`} position="relative" flexDirection="column" flexGrow={1} width={0} minWidth={18}
                   paddingX={1} borderStyle="round" borderColor={DASH_EDGE} hover={{ backgroundColor: CARD_HOVER, borderColor: CARD_HOVER_EDGE }}>
-                  {/* The terminal draws the blank buttons below as real spaces over the card's text, so there each text
-                      row is a button of its own, padded with no-break spaces and clipped to the card, so a click anywhere
-                      on either row opens it (only the word took clicks before). */}
-                  {term ? [
-                    <Box key={`settings-card-row-${c.id}`} overflow="hidden"><Box flexShrink={0}>
-                      <Button key={`settings-card-${c.id}`} plain label={`${c.title} ›${' '.repeat(200)}`} onPress={openCard(c.id)} />
-                    </Box></Box>,
-                    <Box key={`settings-card-row-${c.id}-2`} overflow="hidden"><Box flexShrink={0}>
-                      <Button key={`settings-card-${c.id}-2`} plain dimColor label={`${summaries[c.id]}${' '.repeat(200)}`} onPress={openCard(c.id)} />
-                    </Box></Box>,
-                  ] : [
-                    <Box key={`settings-card-head-${c.id}`} flexDirection="row" gap={1} alignItems="center">
-                      {Svg ? <Svg source={rowIconSvg(c.id, DASH_TEXT)} alt={c.title} width={14} height={14} /> : null}
+                  <Box flexDirection="row" gap={1} alignItems="center">
+                    {Svg && !term ? <Svg source={rowIconSvg(c.id, DASH_TEXT)} alt={c.title} width={14} height={14} /> : null}
+                    {/* The terminal draws the blank buttons below as real spaces over the card's text, so there the
+                        title itself is the button. (Full-width padded buttons per row looked worse: a big lit block.) */}
+                    {term ? (
+                      <Button key={`settings-card-${c.id}`} plain label={`${c.title} ›`} onPress={openCard(c.id)} />
+                    ) : (
                       <Text color={DASH_TEXT} bold hover={{ color: '#ffffff' }}>{c.title}</Text>
-                    </Box>,
-                    <Text key={`settings-card-sum-${c.id}`} dimColor wrap="truncate" hover={{ dimColor: false, color: DASH_TEXT }}>{summaries[c.id]}</Text>,
-                  ]}
+                    )}
+                  </Box>
+                  <Text dimColor wrap="truncate" hover={{ dimColor: false, color: DASH_TEXT }}>{summaries[c.id]}</Text>
                   {/* The click takes the whole card: a button is one line high and centred in its box, whatever the box,
                       so three blank ones are spread from the top edge to the bottom one and overlap. The card lights as a
                       whole (its own hover); two, spaced around, left its edges and a stripe between the lines dead. */}
@@ -4728,8 +4747,8 @@ Saved to ${out}.md and .json` }
               ? []
               : [
                   <Box key="gap" width={2} />,
-                  <Select key="settings-floor" label="Min" value={shown.floor} options={opts(EFFORTS)} onSelect={set('floor')} />,
-                  <Select key="settings-ceiling" label="Max" value={shown.ceiling} options={opts(EFFORTS)} onSelect={set('ceiling')} />,
+                  pick({ key: "settings-floor", label: "Min", value: shown.floor, options: opts(EFFORTS), onSelect: set('floor') }),
+                  pick({ key: "settings-ceiling", label: "Max", value: shown.ceiling, options: opts(EFFORTS), onSelect: set('ceiling') }),
                   // Effort for helpers on a row of its own: the dashboard's Auto switch exactly (switch, word, slide,
                   // one blank button laid over both), then what it does now.
                   <Box key="settings-helpers-row" width="100%" flexDirection="row" alignItems="center" gap={1}>
@@ -4752,8 +4771,7 @@ Saved to ${out}.md and .json` }
                   </Box>,
                 ]),
 ] : card === 'judge' ? (bare ? [] : [
-            <Select key="settings-judge-pick" value={shown.judge} options={[{ value: 'auto', label: hasKey ? 'Haiku + Jev' : 'Haiku (Jev if added)' }, { value: 'haiku', label: 'Haiku only' }]}
-              onSelect={v => set('judge')(v === 'haiku' ? 'haiku' : 'auto')} />,
+            pick({ key: "settings-judge-pick", value: shown.judge, options: [{ value: 'auto', label: hasKey ? 'Haiku + Jev' : 'Haiku (Jev if added)' }, { value: 'haiku', label: 'Haiku only' }], onSelect: v => set('judge')(v === 'haiku' ? 'haiku' : 'auto') }),
             ...(shown.judge !== 'haiku'
               ? [field('key-field', <Input key="settings-key" placeholder={hasKey ? 'Key saved. Paste to replace' : 'Paste TypeSafe key'}
                   value={draft.key ?? ''} submitLabel="ok" onInput={set('key')} onSubmit={set('key')} />, 30)]
@@ -4781,35 +4799,22 @@ Saved to ${out}.md and .json` }
             </Box>
           )).concat([
             // Which model writes a compaction's summary: a model choice, so it sits with the others.
-            <Select key="settings-compact-with" label="Compact with" value={shown.compactWith}
-              options={[{ value: 'haiku', label: 'Haiku 5.5' }, { value: 'session', label: "Chat's model" }]}
-              onSelect={set('compactWith')} />,
+            pick({ key: "settings-compact-with", label: "Compact with", value: shown.compactWith, options: [{ value: 'haiku', label: 'Haiku 5.5' }, { value: 'session', label: "Chat's model" }], onSelect: set('compactWith') }),
           ])) : card === 'handoff' ? (bare ? [] : [
-            <Select key="settings-skill" label="Handoff skill" value={shown.handoffSkill || '-'}
-              options={[
+            pick({ key: "settings-skill", label: "Handoff skill", value: shown.handoffSkill || '-', options: [
                 { value: '-', label: 'effortless (built in)' },
                 ...[...new Set([...(shown.handoffSkill ? [shown.handoffSkill] : []), ...skillNames])].map(name => ({ value: name, label: `/${name}` })),
-              ]}
-              onSelect={v => set('handoffSkill')(v === '-' ? '' : v)} />,
-            <Select key="settings-swamp" label="Compact alert at" value={shown.swampAt}
-              options={SWAMP_STEPS.map(n => ({ value: String(n), label: `${n}%` }))} onSelect={set('swampAt')} />,
-            <Select key="settings-handoff-button" label="Handoff button" value={shown.handoffButton}
-              options={[{ value: 'advised', label: 'When advised' }, { value: 'always', label: 'Always' }]}
-              onSelect={set('handoffButton')} />,
+              ], onSelect: v => set('handoffSkill')(v === '-' ? '' : v) }),
+            pick({ key: "settings-swamp", label: "Compact alert at", value: shown.swampAt, options: SWAMP_STEPS.map(n => ({ value: String(n), label: `${n}%` })), onSelect: set('swampAt') }),
+            pick({ key: "settings-handoff-button", label: "Handoff button", value: shown.handoffButton, options: [{ value: 'advised', label: 'When advised' }, { value: 'always', label: 'Always' }], onSelect: set('handoffButton') }),
             ...alertToggles,
 ]) : [
             ...(bare
               ? []
               : [
-                  <Select key="settings-layout" label="Look" value={shown.layout}
-                    options={[{ value: 'default', label: 'Dashboard' }, { value: 'minimal', label: 'Minimal' }]}
-                    onSelect={set('layout')} />,
-                  <Select key="settings-appearance" label="Appearance" value={shown.appearance}
-                    options={[{ value: 'auto', label: 'Match Claude Code' }, { value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }]}
-                    onSelect={set('appearance')} />,
-                  <Select key="settings-theme" label="Theme" value={shown.theme}
-                    options={[{ value: 'violet', label: 'Violet' }, { value: 'orange', label: 'Claude orange' }, { value: 'rose', label: 'Cherry blossom' }]}
-                    onSelect={set('theme')} />,
+                  pick({ key: "settings-layout", label: "Look", value: shown.layout, options: [{ value: 'default', label: 'Dashboard' }, { value: 'minimal', label: 'Minimal' }], onSelect: set('layout') }),
+                  pick({ key: "settings-appearance", label: "Appearance", value: shown.appearance, options: [{ value: 'auto', label: 'Match Claude Code' }, { value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }], onSelect: set('appearance') }),
+                  pick({ key: "settings-theme", label: "Theme", value: shown.theme, options: [{ value: 'violet', label: 'Violet' }, { value: 'orange', label: 'Claude orange' }, { value: 'rose', label: 'Cherry blossom' }], onSelect: set('theme') }),
                 ]),
             ...toggles,
             ...(bare ? [] : [uninstallButton($, themedEls($.ui.resolve(e)))]),
