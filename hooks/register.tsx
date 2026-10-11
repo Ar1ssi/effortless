@@ -2390,13 +2390,13 @@ function terminalPanel($: EngineInterface, e: RenderInput<'AbovePrompt'>, key: s
   )
 }
 
-type TerminalBand = { key: string; kind: ArtKind; color: string; bg: string; edge: string; title: string; detail: string; buttons: unknown[] }
+type TerminalBand = { key: string; kind: ArtKind; color: string; bg: string; edge: string; title: string; detail: string; buttons: unknown[]; autoInBar?: boolean }
 
 /** An alert band on the terminal: title and buttons, the detail on a line of its own, art on the right, and the effort
  * row under it, so effort stays in sight while a band shows. */
 async function terminalBand($: EngineInterface, e: RenderInput<'AbovePrompt'>, b: TerminalBand) {
   const { Box, Text } = themedEls($.ui.resolve(e))
-  const { rows } = await effortRows($, e)
+  const { rows } = await effortRows($, e, { auto: !b.autoInBar })
   return (
     <Box key={`${b.key}-col`} flexDirection="column">
       <Box key={b.key} flexDirection="row" gap={1} alignItems="center" paddingX={1} backgroundColor={b.bg} borderStyle="round" borderColor={b.edge}>
@@ -3236,10 +3236,12 @@ async function dashboardBand($: EngineInterface, e: RenderInput<'AbovePrompt'>) 
       $.ui.invalidate('ui.render')
     } else await openPluginSettings($)
   }
-  // The terminal's effort row under the band has its own Auto switch.
   const buttons = [
-    // Desktop only (the terminal's effort row has its own); no hotkey letter, which the app draws faint on grey.
-    e.surface === 'terminal' ? null : (
+    // Auto sits in the bar on both: in the terminal the effort row under the band drops its own (autoInBar), since
+    // there it was cut off at the window's foot. The hotkey only in the terminal; the app draws it faint on grey.
+    e.surface === 'terminal' ? (
+      <Button key="dash-auto" hotkey="a" variant={v.auto ? 'primary' : undefined} label={v.auto ? 'Auto on' : 'Auto off'} onPress={() => toggleAutoEffort($)} />
+    ) : (
       <Button key="dash-auto" variant="secondary" dimColor={!v.auto} label={v.auto ? 'Auto on' : 'Auto off'} onPress={() => toggleAutoEffort($)} />
     ),
     // Once the slot is Handoff (advised, or the setting says always), Compact stays beside it as quiet text, so both are
@@ -3302,7 +3304,7 @@ async function dashboardBand($: EngineInterface, e: RenderInput<'AbovePrompt'>) 
     <Button key="dash-settings" plain label={'Svg' in els && e.surface !== 'terminal' ? '   ' : 'Settings'} onPress={toggleSettings} />,
   ].filter(Boolean)
   if (e.surface === 'terminal')
-    return terminalBand($, e, { key: 'dash', kind: 'calm', color: DASH_TEXT, bg: DASH_BG, edge: DASH_EDGE, title: head.replace(/^✦ /, ''), detail, buttons })
+    return terminalBand($, e, { key: 'dash', kind: 'calm', color: DASH_TEXT, bg: DASH_BG, edge: DASH_EDGE, title: head.replace(/^✦ /, ''), detail, buttons, autoInBar: true })
   const Svg = 'Svg' in els ? els.Svg : undefined
   const wordColor = await effortFlash($, what, Boolean(v.judging), entering)
   glowReadAt = Date.now()
@@ -3437,7 +3439,7 @@ async function dashboardBand($: EngineInterface, e: RenderInput<'AbovePrompt'>) 
 
 /** The terminal's rows above the prompt (Effort steps, Auto, the model row when switched on) and, on any surface, the
  * judge's question when it suggests another model. The rows also sit under an alert band, so effort never goes away. */
-async function effortRows($: EngineInterface, e: RenderInput<'AbovePrompt'>) {
+async function effortRows($: EngineInterface, e: RenderInput<'AbovePrompt'>, opts: { auto?: boolean } = {}) {
   const { Box, Text, Button } = themedEls($.ui.resolve(e))
   const v = await snap($)
   const { auto, autoModel, current, judging, wanted, shownByApp } = v
@@ -3527,13 +3529,15 @@ async function effortRows($: EngineInterface, e: RenderInput<'AbovePrompt'>) {
           ),
         )}
         <Box flexGrow={1} />
-        <Button
-          key="auto"
-          hotkey="a"
-          variant={auto ? 'primary' : undefined}
-          label={auto ? 'Auto on' : 'Auto off'}
-          onPress={() => toggleAutoEffort($)}
-        />
+        {opts.auto === false ? null : (
+          <Button
+            key="auto"
+            hotkey="a"
+            variant={auto ? 'primary' : undefined}
+            label={auto ? 'Auto on' : 'Auto off'}
+            onPress={() => toggleAutoEffort($)}
+          />
+        )}
         <Box flexShrink={1} minWidth={0}>
           <Text dimColor wrap="truncate-end">
             {note}

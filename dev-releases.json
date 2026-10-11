@@ -1,5 +1,10 @@
 [
   {
+    "version": "1.70.4",
+    "date": "2026-10-11",
+    "note": "Auto sits in the terminal bar"
+  },
+  {
     "version": "1.70.3",
     "date": "2026-10-11",
     "note": "Terminal Settings cards open from either line; no noise art at rest"

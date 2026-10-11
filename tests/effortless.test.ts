@@ -3192,8 +3192,12 @@ describe('dashboard', () => {
     await closeSetup($, at)
     const band = await $.ui.mount(at)
     const text = await drawn(band)
-    // Auto is switched in the effort row under the band, not twice.
-    expect(await band.find({ key: 'dash-auto' })).toBeUndefined()
+    // Auto is switched in the bar, not twice: the effort row under it drops its own.
+    const before = (await band.find({ key: 'dash-auto' }))?.text
+    expect(before).toContain('Auto')
+    expect(await band.find({ key: 'auto' })).toBeUndefined()
+    await band.press({ key: 'dash-auto' })
+    expect((await band.find({ key: 'dash-auto' }))?.text).not.toBe(before)
     expect(await band.find({ key: 'dash-handoff' })).toBeDefined()
     expect(text).toContain('"children":["Effort"]')
     // No still sparkles at rest: 16 by 4 pixels of them read as noise in a terminal.
