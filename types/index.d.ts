@@ -59,7 +59,7 @@ export type SettingsDraft = {
   compactWith?: string
   /** advised (the slot is Compact until Haiku advises a handoff) or always (the slot is the Handoff button). */
   handoffButton?: string
-  /** on: a prompt the judge calls simple runs on a cheaper model than the chat's; off: always the chat's model. */
+  /** once: the chat's first prompt picks its model for the whole chat; on: a prompt the judge calls simple runs on a cheaper model than the chat's; off: always the chat's model. */
   modelAuto?: string
   /** on: each subagent gets an effort picked by the judge before it starts; off: it runs at the chat's effort. */
   helpers?: string

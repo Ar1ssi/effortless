@@ -2756,6 +2756,64 @@ describe('dashboard', () => {
     expect(await cacheLine()).toContain('40 min left')
   })
 
+  test('pick once per chat: the first prompt picks the model; later verdicts, a cold cache and a redo leave it', { options: { modelAuto: 'once' } } as never, async ($, on) => {
+    engine(on)
+    const mocked = mock.clock(on)
+    on('session.usage', () => ({ value: { context: { tokens: 100_000, window: 1_000_000, percent: 10 } } }) as never)
+    let verdict = ''
+    on('model.complete', () => ({ value: { isAnswered: true as const, text: verdict, usage: USAGE } }))
+    const sent: string[] = []
+    const used = { input_tokens: 5, output_tokens: 40, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 10_000, cache_creation: { ephemeral_1h_input_tokens: 10_000 } }
+    on('turn.step', async function* (_$, e) {
+      sent.push(e.model)
+      return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: used } as never
+    })
+    await start($, on)
+    await closeSetup($, DESK_BAND)
+    await mocked.advance(16_000)
+    const ask = async (v: string, text: string) => {
+      verdict = v
+      await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+      await step($)
+    }
+    // The first prompt picks Haiku for the chat.
+    await ask('{"model":"haiku","effort":"low","why":"lookup"}', 'what is the folder called')
+    expect(sent.at(-1)).toBe('claude-haiku-5-5')
+    // A harder prompt later does not move the chat: its cache is on Haiku.
+    await ask('{"model":"opus","effort":"high","why":"big refactor"}', 'refactor the whole auth layer')
+    expect(sent.at(-1)).toBe('claude-haiku-5-5')
+    // Nor does a cold cache: the pick is once per chat.
+    await mocked.advance(61 * 60_000)
+    await ask('{"model":"sonnet","effort":"low","why":"small fix"}', 'add a log line here')
+    expect(sent.at(-1)).toBe('claude-haiku-5-5')
+    // Nor does a redo, even when the judge calls it hard.
+    await ask('{"model":"opus","effort":"high","why":"retry"}', "no, that's wrong")
+    expect(sent.at(-1)).toBe('claude-haiku-5-5')
+    expect(String((await $.command.run({ command: 'effortless', args: 'debug' })).text)).toContain('once per chat, picked haiku')
+  })
+
+  test('pick once per chat: a first prompt the judge calls hard keeps the chat on its own model for good', { options: { modelAuto: 'once' } } as never, async ($, on) => {
+    engine(on)
+    const mocked = mock.clock(on)
+    let verdict = ''
+    on('model.complete', () => ({ value: { isAnswered: true as const, text: verdict, usage: USAGE } }))
+    const sent: string[] = []
+    on('turn.step', async function* (_$, e) {
+      sent.push(e.model)
+      return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: USAGE } as never
+    })
+    await start($, on)
+    await closeSetup($, DESK_BAND)
+    await mocked.advance(16_000)
+    verdict = '{"model":"opus","effort":"high","why":"big refactor"}'
+    await $.prompt.submit({ text: 'refactor the whole auth layer', wait: false, origin: { kind: 'composer' } })
+    await step($)
+    verdict = '{"model":"haiku","effort":"low","why":"lookup"}'
+    await $.prompt.submit({ text: 'what is the folder called', wait: false, origin: { kind: 'composer' } })
+    await step($)
+    expect(sent).toEqual(['claude-opus-5-5', 'claude-opus-5-5'])
+  })
+
   test('looksLikeRedo: a correction after a cheaper answer, not a thank-you or a new task', () => {
     for (const yes of ["no, that's wrong", 'Nope. still fails on line 3', 'wrong, it is the other file', "that doesn't work", 'still broken', 'try again please', 'funkar inte', 'fel, det ska vara src', 'inte rätt', "it still doesn't compile"])
       expect(looksLikeRedo(yes)).toBe(true)

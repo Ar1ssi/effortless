@@ -192,8 +192,9 @@ const CARDS: readonly { id: SettingsCard; title: string; about: string }[] = [
   { id: 'show', title: 'Customize', about: 'How effortless looks and which parts it shows. Uninstall removes it.' },
   { id: 'judge', title: 'Judge', about: 'Haiku judges prompts and handoffs. Add Jev for quicker effort calls. Test checks it answers.' },
 ]
-// The Model card: the two ways to run. Effort follows the judge in both.
+// The Model card: the three ways to run. Effort follows the judge in all.
 const MODEL_CHOICES = [
+  { value: 'once', label: 'Pick once per chat', tag: '', about: "The first prompt picks the chat's model (Haiku, Sonnet or the chat's own). It never changes mid-chat, so the cache stays warm." },
   { value: 'on', label: 'Cheaper when it can', tag: 'experimental', about: "A simple prompt may run on Haiku or Sonnet. Rarely pays: the other model has to reread the whole chat." },
   { value: 'off', label: "Always the chat's", tag: '', about: "Every prompt keeps the model you picked. Only effort changes." },
 ] as const
@@ -615,7 +616,7 @@ export type JudgeConfig = {
   /** advised: the footer slot is Compact until Haiku advises a handoff. always: it is always the Handoff button. */
   handoffButton: 'advised' | 'always'
   /** A prompt the judge calls simple runs on a cheaper model than the chat's (never a dearer one). */
-  modelAuto: 'on' | 'off'
+  modelAuto: 'on' | 'once' | 'off'
   /** on: every subagent the chat sends off gets an effort picked by the judge before it starts. */
   helpers: 'on' | 'off'
   /** The accent colour of everything effortless draws: the brand violet, Claude orange or cherry-blossom rose. */
@@ -672,7 +673,7 @@ export function readConfig(options: unknown): JudgeConfig {
     handoffButton: str(o.handoffButton) === 'always' ? 'always' : 'advised',
     // Off unless switched on: one prompt on another model rewrites the whole chat into that model's cache, which costs
     // more than it saves in a chat that is in use (measured 2026-10-10).
-    modelAuto: str(o.modelAuto) === 'on' ? 'on' : 'off',
+    modelAuto: str(o.modelAuto) === 'on' ? 'on' : str(o.modelAuto) === 'once' ? 'once' : 'off',
     helpers: str(o.helpers) === 'on' ? 'on' : 'off',
     theme: THEMES.find(t => t === str(o.theme)) ?? 'violet',
     appearance: (['dark', 'light'] as const).find(a => a === str(o.appearance)) ?? 'auto',
@@ -2292,6 +2293,17 @@ const HANDOFF_POLL_MS = 1000
 let routed: ModelKey | null = null
 // Prompts left that stay on the chat's model, after a cheaper answer was redone.
 let stayUp = 0
+// Pick once per chat: whether this chat's model is settled. It settles on the chat's first judged prompt, or on its
+// first response when no judge ran before it; from then `routed` holds the chat's model for good (null: the chat's own).
+// Kept per chat in the store, so a resumed chat goes on where it was and its cache stays the one it warmed.
+let chatModelLocked = false
+async function lockChatModel($: EngineInterface, to: ModelKey | null) {
+  chatModelLocked = true
+  routed = to
+  // The id asked now, not the one at load: /clear starts a new chat in the same load.
+  const sid = await $.session.id().catch(() => null)
+  if (sid) await $.store.set(`chatModel:${sid}`, to ?? 'own').catch(() => undefined)
+}
 const MODEL_RANK: ModelKey[] = ['haiku', 'sonnet', 'opus', 'fable']
 /** The model a verdict sends this prompt to: a cheaper one than the chat's, or null for the chat's own. Never Fable. */
 export function routeTo(verdict: ModelKey, inUse: ModelKey): ModelKey | null {
@@ -3818,6 +3830,12 @@ export const register: Register = (on, options) => {
     ])
     // Which chat this load serves, and when it started: each chat has its own render log.
     loadedSession = String(sid).slice(0, 8)
+    // Pick once per chat: a chat seen before keeps the model it picked; a new one picks on its first prompt.
+    const kept1 = await $.store.get(`chatModel:${sid}`).catch(() => null)
+    if (typeof kept1 === 'string') {
+      chatModelLocked = true
+      routed = kept1 !== 'own' && MODELS.some(m => m.key === kept1) ? (kept1 as ModelKey) : null
+    }
     // Settings the app had no /config row for (see saveSetting), over the ones it passed in.
     if (kept && typeof kept === 'object' && Object.keys(kept).length) {
       config = readConfig({ ...pluginOptions, ...kept })
@@ -3854,6 +3872,15 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     const r = e as { source?: string; seconds_since_last_response?: number; prompt_cache_likely_expired?: boolean }
     classicStart = { at: Date.now(), said: `${r.source ?? '?'}, ${r.seconds_since_last_response ?? '?'}s since reply, expired ${r.prompt_cache_likely_expired ?? '?'}` }
+    // Pick once per chat: /clear starts an empty chat, which picks again. A resumed or forked chat with no pick kept
+    // (it ran before this mode was on) already has a cache on its own model: it stays there.
+    if (r.source === 'clear') {
+      chatModelLocked = false
+      routed = null
+      stayUp = 0
+    } else if ((r.source === 'resume' || r.source === 'fork') && !chatModelLocked) {
+      chatModelLocked = true
+    }
     if ((r.source === 'resume' || r.source === 'fork') && typeof r.seconds_since_last_response === 'number' && cacheExpires === 0) {
       const now = await $.clock.now()
       lastResponseAt = now - r.seconds_since_last_response * 1000
@@ -3995,7 +4022,7 @@ export const register: Register = (on, options) => {
           `handoff: ${await read($, handoffStage)}`,
           `last fork: ${lastFork ? `${lastFork.outcome}, ${ago(lastFork.at)}` : 'none'}`,
           `hidden: ${config.hide.join(',') || 'nothing'}`,
-          `model: ${config.modelAuto === 'on' ? `cheaper when it can, now ${routed ?? 'the chat\'s'}` : 'always the chat\'s'}`,
+          `model: ${config.modelAuto === 'on' ? `cheaper when it can, now ${routed ?? 'the chat\'s'}` : config.modelAuto === 'once' ? `once per chat, ${chatModelLocked ? `picked ${routed ?? 'the chat\'s'}` : 'not picked yet'}` : 'always the chat\'s'}`,
           lastRequest
             ? `last request: app asked ${lastRequest.appModel} at ${lastRequest.appEffort ?? 'none'}, sent ${lastRequest.model} at ${lastRequest.effort ?? 'none'}${lastRequest.model === lastRequest.appModel && lastRequest.effort === lastRequest.appEffort ? ' (unchanged)' : ' (changed by effortless)'}, ${ago(lastRequest.at)}`
             : 'last request: none yet',
@@ -4090,7 +4117,7 @@ Saved to ${out}.md and .json` }
         heldPick = null
         await choose($, applied)
       }
-      if (!midTurn && routed) routed = null
+      if (!midTurn && routed && config.modelAuto !== 'once') routed = null
       await countPrompt($, inUse !== 'haiku' ? named : undefined, 'named', 0, 0)
       void proof($, `named level ${named} in "${e.text.slice(0, 50)}": no judge`)
       $.ui.invalidate('ui.render')
@@ -4143,8 +4170,18 @@ Saved to ${out}.md and .json` }
             await choose($, applied)
           }
         }
+        // Pick once per chat: the first prompt picks the chat's model and it stays for the whole chat.
+        if (config.modelAuto === 'once' && !midTurn) {
+          if (!chatModelLocked) {
+            const to = wantsEffort ? routeTo(verdict.model, inUse) : null
+            await lockChatModel($, to)
+            if (to) await update($, saved, old => ({ ...asSpent(old), moved: asSpent(old).moved + 1 }))
+            void proof($, to ? `this chat runs on ${to} (picked once, the chat is on ${inUse})` : `this chat stays on ${inUse} (picked once)`)
+            $.ui.invalidate('ui.render')
+          }
+        }
         // A prompt the judge calls simple runs on a cheaper model; a message typed mid-turn leaves the running choice.
-        if (!midTurn) {
+        else if (!midTurn) {
           let to = wantsEffort && config.modelAuto === 'on' ? routeTo(verdict.model, inUse) : null
           // The last prompt ran on a cheaper model and this one says it was wrong: that is a miss. The retry runs on the
           // chat's own model, and so do the next few prompts.
@@ -4203,6 +4240,9 @@ Saved to ${out}.md and .json` }
       // A prompt run on a cheaper model leaves the chat's own cache as it was: only the chat's model restarts the countdown.
       if (e.agentId === undefined && answer?.usage && request.model === e.model) await cacheTouched($, answer.usage).catch(() => undefined)
       if (e.agentId === undefined && answer?.usage) turnCost += weighted(answer.usage)
+      // Pick once per chat: a response that came before any pick (the judge was skipped or failed) warmed the chat's own
+      // model, so the chat stays there.
+      if (e.agentId === undefined && answer?.usage && config.modelAuto === 'once' && !chatModelLocked) await lockChatModel($, null).catch(() => undefined)
       if (e.agentId !== undefined && answer?.usage) await agentCost($, e.agentId, weighted(answer.usage)).catch(() => undefined)
       return answer
     }
@@ -4579,7 +4619,7 @@ Saved to ${out}.md and .json` }
       const judgeName = shown.judge === 'haiku' ? 'Haiku' : hasKey || shown.judge === 'jev' ? 'Haiku + Jev' : 'Haiku'
       const summaries: Record<SettingsCard, string> = {
         effort: `${BIAS_WORDS[shown.bias + 2]} · ${shown.floor} to ${shown.ceiling}${shown.helpers === 'on' ? ' · helpers' : ''}`,
-        model: shown.modelAuto === 'on' ? 'Cheaper when it can' : "Always the chat's",
+        model: shown.modelAuto === 'on' ? 'Cheaper when it can' : shown.modelAuto === 'once' ? 'Pick once per chat' : "Always the chat's",
         judge: tested && tested.ok !== null ? `${judgeName} · ${tested.ok ? 'working' : 'failing'}` : judgeName,
         handoff: `${shown.handoffSkill ? `/${shown.handoffSkill}` : 'Built in'} · compact alert at ${shown.swampAt}%`,
         show: `${shown.layout === 'minimal' ? 'Minimal' : 'Dashboard'} · ${2 - ['timer', 'reason'].filter(h => hidden.includes(h)).length} of 2 on`,
