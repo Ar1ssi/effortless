@@ -2792,8 +2792,13 @@ describe('dashboard', () => {
     expect(String((await $.command.run({ command: 'effortless', args: 'debug' })).text)).toContain('once per chat, picked haiku')
   })
 
-  test('pick once per chat: a first prompt the judge calls hard keeps the chat on its own model for good', { options: { modelAuto: 'once' } } as never, async ($, on) => {
+  test('pick once per chat: a first prompt the judge calls hard keeps the chat on its own model for good, and says so', { options: { modelAuto: 'once' } } as never, async ($, on) => {
     engine(on)
+    const said: string[] = []
+    on('ui.toast', (_$, e) => {
+      said.push(String((e as { text?: string }).text ?? e))
+      return { value: undefined } as never
+    })
     const mocked = mock.clock(on)
     let verdict = ''
     on('model.complete', () => ({ value: { isAnswered: true as const, text: verdict, usage: USAGE } }))
@@ -2808,10 +2813,90 @@ describe('dashboard', () => {
     verdict = '{"model":"opus","effort":"high","why":"big refactor"}'
     await $.prompt.submit({ text: 'refactor the whole auth layer', wait: false, origin: { kind: 'composer' } })
     await step($)
+    // A pick that changes nothing is still a pick: it is said, so the person knows it happened.
+    expect(said.join(' ')).toContain('this chat stays on Opus (picked from your first prompt)')
     verdict = '{"model":"haiku","effort":"low","why":"lookup"}'
     await $.prompt.submit({ text: 'what is the folder called', wait: false, origin: { kind: 'composer' } })
     await step($)
     expect(sent).toEqual(['claude-opus-5-5', 'claude-opus-5-5'])
+  })
+
+  test('pick once per chat at Enter (nothing ran while it was typed): a simple first prompt runs its first turn on Haiku, and the chat is switched for real when the turn ends', { options: { modelAuto: 'once' } } as never, async ($, on) => {
+    engine(on)
+    const mocked = mock.clock(on)
+    const ran = recordCommands(on)
+    judgeSays(on, '{"model":"haiku","effort":"low","why":"lookup"}')
+    on('turn.complete', () => ({ text: '' }))
+    const sent = recordSteps(on)
+    await start($, on)
+    await closeSetup($, DESK_BAND)
+    await mocked.advance(16_000)
+    // The desktop app is an SDK host: it starts the engine at the first Enter and sends that prompt at once.
+    await $.prompt.submit({ text: 'what is the folder called', wait: false, origin: { kind: 'sdk' } })
+    await step($)
+    // The first turn is routed to the pick; no command ran inside the prompt's hook (the app refuses one there).
+    expect(sent).toEqual([{ model: 'claude-haiku-5-5', effort: 'low' }])
+    expect(ran).toEqual([])
+    expect(String((await $.command.run({ command: 'effortless', args: 'debug' })).text)).toContain('once per chat, picked haiku (the switch lands when the turn ends)')
+    // The turn ended: the chat is switched for real, where the app allows a command.
+    await $.turn.complete({ turnId: 't1', answer: 'src', durationMs: 1, isAborted: false, reason: 'answer' } as never)
+    expect(ran).toEqual(['/model haiku'])
+    expect(String((await $.command.run({ command: 'effortless', args: 'debug' })).text)).toContain('once per chat, picked haiku')
+  })
+
+  test('pick once per chat at Enter: a hard first prompt on Sonnet asks before moving up; the question dismissed, the chat stays on Sonnet one effort level up', { options: { modelAuto: 'once' } } as never, async ($, on) => {
+    // Sonnet, not Haiku: Haiku takes no effort, so a raised level would not show on its request.
+    engine(on, {}, 'claude-sonnet-5-5')
+    const mocked = mock.clock(on)
+    const ran = recordCommands(on)
+    judgeSays(on, '{"model":"opus","effort":"high","why":"big refactor"}')
+    on('turn.complete', () => ({ text: '' }))
+    const asked: string[] = []
+    on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => {
+      // A tool's arguments sit on the event itself, beside `tool` and `tool_use_id`.
+      asked.push(JSON.stringify((e as { questions?: unknown }).questions))
+      return { deny: 'dismissed' }
+    })
+    const sent = recordSteps(on)
+    await start($, on)
+    await closeSetup($, DESK_BAND)
+    await mocked.advance(16_000)
+    await $.prompt.submit({ text: 'refactor the whole auth layer', wait: false, origin: { kind: 'sdk' } })
+    expect(asked.length).toBe(1)
+    expect(asked[0]).toContain('Move up to Opus')
+    expect(asked[0]).toContain('Stay on Sonnet, raise effort')
+    const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-sonnet-5-5', effort: 'high', messageCount: 1 })
+    for await (const _ of stream) {
+      // drain
+    }
+    expect(sent).toEqual([{ model: 'claude-sonnet-5-5', effort: 'xhigh' }])
+    await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1, isAborted: false, reason: 'answer' } as never)
+    expect(ran).toEqual([])
+    expect(String((await $.command.run({ command: 'effortless', args: 'debug' })).text)).toContain("once per chat, picked the chat's")
+  })
+
+  test('pick once per chat at Enter: yes to the move-up question routes the first turn to Opus and switches the chat when the turn ends', { options: { modelAuto: 'once' } } as never, async ($, on) => {
+    engine(on, {}, 'claude-haiku-5-5')
+    const mocked = mock.clock(on)
+    const ran = recordCommands(on)
+    judgeSays(on, '{"model":"opus","effort":"high","why":"big refactor"}')
+    on('turn.complete', () => ({ text: '' }))
+    on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => {
+      const questions = (e as { questions: { question: string }[] }).questions
+      return { result: { questions, answers: { [questions[0]!.question]: 'Move up to Opus' } } } as never
+    })
+    const sent = recordSteps(on)
+    await start($, on)
+    await closeSetup($, DESK_BAND)
+    await mocked.advance(16_000)
+    await $.prompt.submit({ text: 'refactor the whole auth layer', wait: false, origin: { kind: 'sdk' } })
+    const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-haiku-5-5', effort: 'high', messageCount: 1 })
+    for await (const _ of stream) {
+      // drain
+    }
+    expect(sent).toEqual([{ model: 'claude-opus-5-5', effort: 'high' }])
+    await $.turn.complete({ turnId: 't1', answer: 'done', durationMs: 1, isAborted: false, reason: 'answer' } as never)
+    expect(ran).toEqual(['/model opus'])
   })
 
   test('looksLikeRedo: a correction after a cheaper answer, not a thank-you or a new task', () => {

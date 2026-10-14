@@ -198,6 +198,10 @@ declare module 'claude-code' {
       pick: Pick | null
       isJudging: boolean
       suggestion: ModelKey | null
+      /** Pick once per chat, before the prompt is sent: reading the draft, asking about a move up, or done. */
+      modelScan: { stage: 'scanning' } | { stage: 'ask'; from: ModelKey; to: ModelKey } | { stage: 'done'; model: ModelKey; moved: boolean } | null
+      /** The update check, for the Customize card: idle, checking, newest, or found <version>. */
+      updateCheck: string
       /** The effort the person last set outside the mod (the app's control, their /effort): what the app shows. */
       appEffort: string | null
       /** The model the session runs now, as the engine last reported it (start, a switch, a request). */
